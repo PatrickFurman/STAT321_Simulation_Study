@@ -55,7 +55,7 @@ draw_community = function(deck, n = 1) {
   }
 }
 
-# Calculate the score of a players' hand
+# Calculate the score of a players' hand (not currently implemented)
 calc_score = function(p) {
   # startsWith(d$cards, "Queen")
   return(1)
@@ -63,17 +63,25 @@ calc_score = function(p) {
 
 # Increases/decreases money field of provided player object by amount
 # If a list of players is passed, they're all modified by amount
+# NOTE: must pass as players[i] not just p1 - will return an error (not sure why)
 update_money = Vectorize(function(p, amount) {
   p$money = p$money + amount
+  return(p$money)
 })
+
+# Setting up players
+p1 = player(hand=vector(), money=1000, score=0)
+p2 = player(hand=vector(), money=1000, score=0)
+players = c(p1, p2) 
 
 # Simulating a single hand of Texas hold'em poker
 simulate_hand = function() {
   # Initialize deck and player's hands
   d = deck(cards=shuffle_deck(make_deck()))
-  p1 = player(hand=draw(d,2), money=1000, score=0)
-  p2 = player(hand=draw(d,2), money=1000, score=0)
-  players = c(p1, p2, p3) 
+  for (p in players) {
+    p$hand = draw(d,2)
+    p$score = 0
+  }
   pool = 0
   
   # Initial betting
@@ -94,7 +102,7 @@ simulate_hand = function() {
   # Calculate hands and determine winner
   scores = vector(mode="numeric", length=length(players))
   for (p in 1:length(players)) {
-    #players[[p]]$score = calc_score(players[[p]])
+    players[[p]]$score = calc_score(players[[p]])
     scores[p] = players[[p]]$score
   }
   # Vector of winning player(s)
