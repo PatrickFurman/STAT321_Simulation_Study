@@ -8,7 +8,8 @@
 
 
 deck = setRefClass("deck", fields=list(cards="vector"))
-player = setRefClass("player", fields=list(hand="vector", money="numeric", score="numeric"))
+player = setRefClass("player", fields=list(hand="vector", money="numeric",
+                                           score="numeric", high_card="numeric"))
 
 # Function to take existing deck and randomly order all cards
 shuffle_deck = function(deck) {
@@ -55,10 +56,140 @@ draw_community = function(deck, n = 1) {
   }
 }
 
-# Calculate the score of a players' hand (not currently implemented)
+# Draws n cards from deck for each player and adds to their hands
+deal_all = function(deck, n = 1) {
+  for (p in players) {
+    p$hand = append(p$hand, draw(deck,n))
+  }
+}
+
+# Helper function for calc_score that uses a vector of how many cards of each rank
+# are in a hand to determine if those cards form a straight
+contains_straight = function(ranks) {
+  has_rank = which(ranks > 0)
+  temp = has_rank[1]
+  in_a_row = 1
+  for (i in 2:length(has_rank)) {
+    temp2 = has_rank[i]
+    if (temp2 == (temp + 1)) {
+      in_a_row = in_a_row + 1
+      if (in_a_row == 5) {
+        # Straight
+        return(TRUE)
+      }
+    } else {
+      in_a_row = 1
+    }
+    temp = has_rank[i]
+  }
+  return(FALSE)
+}
+
+# Calculate the score of a players' hand
+# Score is returned as a two element vector with hand score and high card
+# Known issues:
+# 1) Evaluates all pairs/straights/flushes etc. as being worth an equal score
+#    when it should take into account the high card of the straight (or respective hand)
+# 2) Doesn't ensure that the chosen high card is one of the 5 cards that make up the best
+#    possible hand (only important for straights/flushes/other five card hands)
 calc_score = function(p) {
-  # startsWith(d$cards, "Queen")
-  return(1)
+  suits = c("Clubs", "Hearts", "Spades", "Diamonds")
+  ranks = c("2", "3", "4", "5", "6", "7", "8", "9", "10", "Jack", "Queen", "King", "Ace")
+  highest = 0
+  straight = FALSE
+  num_of_each_rank = rep(0, 13)
+  num_of_each_suit = rep(0, 4)
+  i = 1
+  # Calculate number of each rank in hand for pairs/3 of a kind etc.
+  for (rank in ranks) {
+    num_of_each_rank[i] = sum(startsWith(p$hand, rank))
+    i = i + 1
+  }
+  i = 1
+  # Calculate number of each suit in hand for flush
+  for (suit in suits) {
+    num_of_each_suit[i] = sum(endsWith(p$hand, suit))
+    i = i + 1
+  }
+  # First scoring by rank because highest possible hands are dependent on suit
+  # so they can overwrite later if needed
+  of_a_kind = max(num_of_each_rank)
+  if (of_a_kind < 4) {
+    if (of_a_kind == 3) {
+      if (2 %in% num_of_each_rank | sum(which(num_of_each_rank == 3)) == 2) {
+        # Full house
+        highest = 6
+      } else {
+        # Three of a kind
+        highest = 3
+      }
+    } else if (of_a_kind == 2) {
+      if (sum(2==num_of_each_rank) >= 2) {
+        # Two pair
+        highest = 2
+      } else {
+        # One pair
+        highest = 1
+      }
+    }
+  } else {
+    # 4 of a kind
+    highest = 7
+  }
+  # Checking for straight
+  if (contains_straight(num_of_each_rank)) {
+    if (highest < 4) {
+      highest = 4
+    }
+    straight = TRUE
+  }
+  # Scoring again looking at suits to check for flushes
+  if (max(num_of_each_suit) >= 5) {
+    # Then hand is a flush of some type
+    if (straight) {
+      # Then either straight flush or royal flush
+      if (num_of_each_rank[13] > 0) {
+        # Then has ace, so probably a royal flush
+        flush_suit = suits[which(num_of_each_suit == max(num_of_each_suit))]
+        full_hand = p$hand
+        # Making a new hand with only cards of the same suit as the flush
+        flush_hand = c()
+        for (card in full_hand) {
+          if (endsWith(card, flush_suit)) {
+            flush_hand = append(flush_hand, card)
+          }
+        }
+        flush_hand_ranks = rep(0, 13)
+        j = 1
+        # Calculate number of each rank in flush_hand
+        for (rank in ranks) {
+          flush_hand_ranks[j] = sum(startsWith(flush_hand, rank))
+          j = j + 1
+        }
+        # Check if ace, king, and queen are present (minimum to guarantee that the
+        # flush goes from 10 to ace)
+        if (flush_hand_ranks[13] > 0 && flush_hand_ranks[12] > 0 && flush_hand_ranks[11] > 0) {
+          # Royal Flush
+          highest = 9
+        } else {
+          # Straight Flush (with ace as high card but not a part of the straight)
+          highest = 8
+        }
+      } else {
+        # Straight flush
+        highest = 8
+      }
+    } else {
+      # Regular flush
+      if (highest < 5) {
+        highest = 5
+      }
+    }
+  }
+  # Find high card to return with hand score for ties
+  high_card = max(which(num_of_each_rank > 0)) + 1
+  p$score=highest
+  p$high_card=high_card
 }
 
 # Increases/decreases money field of provided player object by amount
@@ -69,48 +200,117 @@ update_money = Vectorize(function(p, amount) {
   return(p$money)
 })
 
-# Setting up players
-p1 = player(hand=vector(), money=1000, score=0)
-p2 = player(hand=vector(), money=1000, score=0)
-players = c(p1, p2) 
+# Setting up players (went with 7 to avoid dealing with situation where
+# it's possible to run out of cards)
+p1 = player(hand=vector(), money=1000, score=0, high_card=0)
+p2 = player(hand=vector(), money=1000, score=0, high_card=0)
+p3 = player(hand=vector(), money=1000, score=0, high_card=0)
+p4 = player(hand=vector(), money=1000, score=0, high_card=0)
+p5 = player(hand=vector(), money=1000, score=0, high_card=0)
+p6 = player(hand=vector(), money=1000, score=0, high_card=0)
+p7 = player(hand=vector(), money=1000, score=0, high_card=0)
+players = c(p1, p2, p3, p4, p5, p6, p7) 
 
-# Simulating a single hand of Texas hold'em poker
+# Simulating a single hand of seven-card stud poker
 simulate_hand = function() {
   # Initialize deck and player's hands
   d = deck(cards=shuffle_deck(make_deck()))
   for (p in players) {
-    p$hand = draw(d,2)
-    p$score = 0
+    p$score = 0 # Reset score after each round
+    p$hand = vector() # Reset hand after each round
   }
-  pool = 0
+  deal_all(d,3) # Deal two face down cards plus one face up to each player
+  pot = 100
   
   # Initial betting
   
-  # Drawing the flop
-  draw_community(d, 3)
-  
-  # Repeat betting and reveal cycle twice more
-  for (i in 1:2) {
+  # Repeat betting and dealing cycle 3 times (third-sixth streets)
+  for (i in 1:3) {
+    # Scoring? (to inform bets) -- maybe not necessary
+    
     # Betting
     
-    # Reveal next card
-    draw_community(d)
+    # Dealing everyone another card
+    deal_all(d)
   }
+  
+  # Final face up card (seventh street)
+  deal_all(d)
   
   # Final bets
   
   # Calculate hands and determine winner
   scores = vector(mode="numeric", length=length(players))
+  high_cards = vector(mode="numeric", length=length(players))
   for (p in 1:length(players)) {
-    players[[p]]$score = calc_score(players[[p]])
+    calc_score(players[[p]])
+    high_cards[p] = players[[p]]$high_card
     scores[p] = players[[p]]$score
   }
   # Vector of winning player(s)
-  winners = players[c(which(scores==(max(scores))))]
+  ties = which(scores==(max(scores)))
+  winners = players[c(ties[which(high_cards[c(ties)]==(max(high_cards[c(ties)])))])]
   
-  # Award pool to winner
-  per_player = pool / length(winners)
+  # Award pot to winner(s)
+  per_player = pot / length(winners)
   update_money(winners, per_player)
 }
+
+# Frequency of Each Type of Hand ------------------------------------------
+
+# Creates 70,000 hands, scores them and returns results in a vector
+f = function(x) {
+  deck = setRefClass("deck", fields=list(cards="vector"))
+  player = setRefClass("player", fields=list(hand="vector", money="numeric",
+                                             score="numeric", high_card="numeric"))
+  
+  recorded_scores = c("0"=0, "1"=0, "2"=0, "3"=0, "4"=0, "5"=0, "6"=0, "7"=0, "8"=0, "9"=0)
+  for(i in 1:10000) {
+    p1 = player(hand=vector(), money=1000, score=0, high_card=0)
+    p2 = player(hand=vector(), money=1000, score=0, high_card=0)
+    p3 = player(hand=vector(), money=1000, score=0, high_card=0)
+    p4 = player(hand=vector(), money=1000, score=0, high_card=0)
+    p5 = player(hand=vector(), money=1000, score=0, high_card=0)
+    p6 = player(hand=vector(), money=1000, score=0, high_card=0)
+    p7 = player(hand=vector(), money=1000, score=0, high_card=0)
+    players = c(p1, p2, p3, p4, p5, p6, p7) 
+    d = deck(cards=shuffle_deck(make_deck()))
+    for (p in players) {
+      p$hand = draw(d,7)
+      p$score = 0
+      calc_score(p)
+      score = as.character(p$score)
+      recorded_scores[score] = recorded_scores[score] + 1
+    }
+  }
+  return(recorded_scores)
+}
+
+library(foreach)
+library(doParallel)
+num_cores = detectCores()
+cl = makeCluster(num_cores - 1)
+registerDoParallel(cl)
+
+start = Sys.time()
+# Currently will process 70,000 * length(x) times - To change, alter i in f(x) or players vector
+recorded_scores = foreach(x = 1:10, .combine='+') %dopar% f(x)
+end = Sys.time()
+end-start
+
+# Taking combined vector of scores from above and making a dataframe with percentage
+# probability of getting each type of hand
+df = data.frame(Percent_of_Hands=recorded_scores[c(1:10)] / sum(recorded_scores) * 100,
+                row.names = c("High Card", "Pair", "2 Pair", "3 of a Kind", "Straight",
+                              "Flush", "Full House", "4 of a Kind", "Straight Flush", "Royal Flush"))
+df
+
+
+# Probability of Winning Based on Cards in the Hole -----------------------
+
+
+
+
+# Betting High vs. Betting Low --------------------------------------------
 
 
