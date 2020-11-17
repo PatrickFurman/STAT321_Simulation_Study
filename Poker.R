@@ -222,13 +222,13 @@ simulate_hand = function() {
   deal_all(d,3) # Deal two face down cards plus one face up to each player
   pot = 100
   
-  # Initial betting
+  # Initial betting - starting with lowest valued shown card
   
   # Repeat betting and dealing cycle 3 times (third-sixth streets)
   for (i in 1:3) {
-    # Scoring? (to inform bets) -- maybe not necessary
+    # Scoring? (to inform bets)
     
-    # Betting
+    # Betting - starting with highest valued shown hand
     
     # Dealing everyone another card
     deal_all(d)
@@ -293,7 +293,7 @@ cl = makeCluster(num_cores - 1)
 registerDoParallel(cl)
 
 start = Sys.time()
-# Currently will process 70,000 * length(x) times - To change, alter i in f(x) or players vector
+# Currently will process 70,000 * length(x) hands - To change, alter i or players vector in f(x)
 recorded_scores = foreach(x = 1:10, .combine='+') %dopar% f(x)
 end = Sys.time()
 end-start
