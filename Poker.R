@@ -85,11 +85,43 @@ contains_straight = function(ranks) {
   return(FALSE)
 }
 
+get_straight_hand = function(ranks) {
+  straight_hand_ranks = ranks
+  consecutive = 0
+  for (i in 1:(length(straight_hand_ranks) - 1)) {
+    if (straight_hand_ranks[i] != 0) {
+      consecutive = consecutive + 1
+      if (straight_hand_ranks[i+1] == 0 && consecutive < 4) {
+        straight_hand_ranks[i] = 0
+      }
+    }
+  }
+  return(straight_hand_ranks)
+}
+
+get_flush_hand = function(full_hand, num_of_each_suit, suits, ranks) {
+  flush_suit = suits[which(num_of_each_suit == max(num_of_each_suit))]
+  flush_hand = c()
+  for (card in full_hand) {
+    if (endsWith(card, flush_suit)) {
+      flush_hand = append(flush_hand, card)
+    }
+  }
+  flush_hand_ranks = rep(0, 13)
+  j = 1
+  # Calculate number of each rank in flush_hand
+  for (rank in ranks) {
+    flush_hand_ranks[j] = sum(startsWith(flush_hand, rank))
+    j = j + 1
+  }
+  return(flush_hand_ranks)
+}
+
 # Calculate the score of a players' hand
 # Score is returned as a two element vector with hand score and high card
 # Known issues:
-# 1) Evaluates all pairs/straights/flushes etc. as being worth an equal score
-#    when it should take into account the high card of the straight (or respective hand)
+# 1) Straight flush and rare flush are being drawn less often than theoretical
+#    probabilities suggest they should be
 # 2) Doesn't ensure that the chosen high card is one of the 5 cards that make up the best
 #    possible hand (only important for straights/flushes/other five card hands)
 calc_score = function(p) {
@@ -116,79 +148,71 @@ calc_score = function(p) {
   of_a_kind = max(num_of_each_rank)
   if (of_a_kind < 4) {
     if (of_a_kind == 3) {
-      if (2 %in% num_of_each_rank | sum(which(num_of_each_rank == 3)) == 2) {
+      if (2 %in% num_of_each_rank | length(which(num_of_each_rank == 3)) == 2) {
         # Full house
-        highest = 6
+        rank_of_hand = max(which(num_of_each_rank %in% c(2,3))) + 1
+        highest = 84 + rank_of_hand
       } else {
         # Three of a kind
-        highest = 3
+        rank_of_three = max(which(num_of_each_rank == 3)) + 1
+        highest = 42 + rank_of_three
       }
     } else if (of_a_kind == 2) {
       if (sum(2==num_of_each_rank) >= 2) {
         # Two pair
-        highest = 2
+        rank_of_pair = max(which(num_of_each_rank == 2)) + 1
+        highest = 28 + rank_of_pair
       } else {
         # One pair
-        highest = 1
+        rank_of_pair = max(which(num_of_each_rank == 2)) + 1
+        highest = 14 + rank_of_pair
       }
     }
   } else {
     # 4 of a kind
-    highest = 7
+    rank_of_four = max(which(num_of_each_rank == 4)) + 1
+    highest = 98 + rank_of_four
   }
   # Checking for straight
   if (contains_straight(num_of_each_rank)) {
-    if (highest < 4) {
-      highest = 4
+    straight_hand_ranks = get_straight_hand(num_of_each_rank)
+    flush_hand_ranks = rep(0, 13)
+    if (max(num_of_each_suit) >= 5) {
+      flush_hand_ranks = get_flush_hand(p$hand, num_of_each_suit, suits, ranks)
     }
-    straight = TRUE
+    # Checking if straight also contains flush
+    if (sum(straight_hand_ranks == flush_hand_ranks) == 13) {
+      if (straight_hand_ranks[13] == 1) {
+        # Royal Flush
+        highest=127
+      } else {
+        # Straight Flush
+        rank_of_flush = max(which(straight_hand_ranks > 0)) + 1
+        highest = 112 + rank_of_flush
+      }
+    } else if (highest < 57) {
+      # Straight
+      straight_rank = max(which(straight_hand_ranks > 0)) + 1
+      highest = 56 + straight_rank
+    }
   }
   # Scoring again looking at suits to check for flushes
   if (max(num_of_each_suit) >= 5) {
-    # Then hand is a flush of some type
-    if (straight) {
-      # Then either straight flush or royal flush
-      if (num_of_each_rank[13] > 0) {
-        # Then has ace, so probably a royal flush
-        flush_suit = suits[which(num_of_each_suit == max(num_of_each_suit))]
-        full_hand = p$hand
-        # Making a new hand with only cards of the same suit as the flush
-        flush_hand = c()
-        for (card in full_hand) {
-          if (endsWith(card, flush_suit)) {
-            flush_hand = append(flush_hand, card)
-          }
-        }
-        flush_hand_ranks = rep(0, 13)
-        j = 1
-        # Calculate number of each rank in flush_hand
-        for (rank in ranks) {
-          flush_hand_ranks[j] = sum(startsWith(flush_hand, rank))
-          j = j + 1
-        }
-        # Check if ace, king, and queen are present (minimum to guarantee that the
-        # flush goes from 10 to ace)
-        if (flush_hand_ranks[13] > 0 && flush_hand_ranks[12] > 0 && flush_hand_ranks[11] > 0) {
-          # Royal Flush
-          highest = 9
-        } else {
-          # Straight Flush (with ace as high card but not a part of the straight)
-          highest = 8
-        }
-      } else {
-        # Straight flush
-        highest = 8
-      }
-    } else {
+    if (highest < 71) {
       # Regular flush
-      if (highest < 5) {
-        highest = 5
-      }
+      flush_hand_ranks = get_flush_hand(p$hand, num_of_each_suit, suits, ranks)
+      rank_of_flush = max(which(flush_hand_ranks == 1)) + 1
+      highest = 70 + rank_of_flush
     }
   }
   # Find high card to return with hand score for ties
   high_card = max(which(num_of_each_rank > 0)) + 1
-  p$score=highest
+  p$score = highest
+  if (highest == 0) {
+    p$score=high_card
+  } else {
+    p$score=highest
+  }
   p$high_card=high_card
 }
 
@@ -264,7 +288,7 @@ f = function(x) {
   player = setRefClass("player", fields=list(hand="vector", money="numeric",
                                              score="numeric", high_card="numeric"))
   
-  recorded_scores = c("0"=0, "1"=0, "2"=0, "3"=0, "4"=0, "5"=0, "6"=0, "7"=0, "8"=0, "9"=0)
+  recorded_scores = rep(0,127)
   for(i in 1:10000) {
     p1 = player(hand=vector(), money=1000, score=0, high_card=0)
     p2 = player(hand=vector(), money=1000, score=0, high_card=0)
@@ -279,8 +303,7 @@ f = function(x) {
       p$hand = draw(d,7)
       p$score = 0
       calc_score(p)
-      score = as.character(p$score)
-      recorded_scores[score] = recorded_scores[score] + 1
+      recorded_scores[p$score] = recorded_scores[p$score] + 1
     }
   }
   return(recorded_scores)
@@ -289,7 +312,7 @@ f = function(x) {
 library(foreach)
 library(doParallel)
 num_cores = detectCores()
-cl = makeCluster(num_cores - 1)
+cl = makeCluster(num_cores - 2)
 registerDoParallel(cl)
 
 start = Sys.time()
@@ -298,12 +321,17 @@ recorded_scores = foreach(x = 1:10, .combine='+') %dopar% f(x)
 end = Sys.time()
 end-start
 
+recorded_hands = c("0"=0, "1"=0, "2"=0, "3"=0, "4"=0, "5"=0, "6"=0, "7"=0, "8"=0, "9"=0)
+for (i in 0:8) {
+  recorded_hands[i+1] = sum(recorded_scores[(i*14+1):((i+1)*14)])
+}
+recorded_hands[10] = recorded_scores[127]
 # Taking combined vector of scores from above and making a dataframe with percentage
 # probability of getting each type of hand
-df = data.frame(Percent_of_Hands=recorded_scores[c(1:10)] / sum(recorded_scores) * 100,
+df = data.frame(Percent_of_Hands=recorded_hands[c(1:10)] / sum(recorded_hands) * 100,
                 row.names = c("High Card", "Pair", "2 Pair", "3 of a Kind", "Straight",
                               "Flush", "Full House", "4 of a Kind", "Straight Flush", "Royal Flush"))
-df
+format(df, scientific=FALSE)
 
 
 # Probability of Winning Based on Cards in the Hole -----------------------
