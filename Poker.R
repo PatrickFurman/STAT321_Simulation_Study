@@ -67,6 +67,9 @@ deal_all = function(deck, n = 1) {
 # are in a hand to determine if those cards form a straight
 contains_straight = function(ranks) {
   has_rank = which(ranks > 0)
+  if (length(has_rank) == 0) {
+    return(FALSE)
+  }
   temp = has_rank[1]
   in_a_row = 1
   for (i in 2:length(has_rank)) {
@@ -85,6 +88,8 @@ contains_straight = function(ranks) {
   return(FALSE)
 }
 
+# Takes in a vector of num_of_each_rank style and then removes and returns
+# a new vector with all non-consecutive ranks removed
 get_straight_hand = function(ranks) {
   straight_hand_ranks = ranks
   consecutive = 0
@@ -102,6 +107,8 @@ get_straight_hand = function(ranks) {
   return(straight_hand_ranks)
 }
 
+# Takes in a player hand and returns a num_of_each_rank style vector that 
+# only counts cards of the flush suit
 get_flush_hand = function(full_hand, num_of_each_suit, suits, ranks) {
   flush_suit = suits[which(num_of_each_suit == max(num_of_each_suit))]
   flush_hand = c()
@@ -122,9 +129,6 @@ get_flush_hand = function(full_hand, num_of_each_suit, suits, ranks) {
 
 # Calculate the score of a players' hand
 # Score is returned as a two element vector with hand score and high card
-# Known issues:
-# 1) Straight flush and rare flush are being drawn less often than theoretical
-#    probabilities suggest they should be
 calc_score = function(p) {
   suits = c("Clubs", "Hearts", "Spades", "Diamonds")
   ranks = c("2", "3", "4", "5", "6", "7", "8", "9", "10", "Jack", "Queen", "King", "Ace")
@@ -184,14 +188,15 @@ calc_score = function(p) {
       flush_hand_ranks = get_flush_hand(p$hand, num_of_each_suit, suits, ranks)
     }
     # Checking if straight also contains flush
-    if (sum(straight_hand_ranks == flush_hand_ranks) == 13) {
-      if (straight_hand_ranks[13] == 1) {
+    if (contains_straight(flush_hand_ranks)) {
+      straight_flush_hand = get_straight_hand(flush_hand_ranks)
+      if (straight_flush_hand[13] == 1) {
         # Royal Flush
         high_card = 14
         highest=127
       } else {
         # Straight Flush
-        rank_of_flush = max(which(straight_hand_ranks > 0)) + 1
+        rank_of_flush = max(which(straight_flush_hand > 0)) + 1
         high_card = rank_of_flush
         highest = 112 + high_card
       }
@@ -295,7 +300,6 @@ f = function(x) {
   deck = setRefClass("deck", fields=list(cards="vector"))
   player = setRefClass("player", fields=list(hand="vector", money="numeric",
                                              score="numeric", high_card="numeric"))
-  
   recorded_scores = rep(0,127)
   p1 = player(hand=vector(), money=1000, score=0, high_card=0)
   p2 = player(hand=vector(), money=1000, score=0, high_card=0)
@@ -326,7 +330,7 @@ registerDoParallel(cl)
 
 start = Sys.time()
 # Currently will process 70,000 * length(x) hands - To change, alter i or players vector in f(x)
-recorded_scores = foreach(x = 1:100, .combine='+') %dopar% f(x)
+recorded_scores = foreach(x = 1:10, .combine='+') %dopar% f(x)
 end = Sys.time()
 end-start
 
