@@ -93,7 +93,10 @@ get_straight_hand = function(ranks) {
       consecutive = consecutive + 1
       if (straight_hand_ranks[i+1] == 0 && consecutive < 4) {
         straight_hand_ranks[i] = 0
+        consecutive = 0
       }
+    } else {
+      consecutive = 0
     }
   }
   return(straight_hand_ranks)
@@ -122,12 +125,11 @@ get_flush_hand = function(full_hand, num_of_each_suit, suits, ranks) {
 # Known issues:
 # 1) Straight flush and rare flush are being drawn less often than theoretical
 #    probabilities suggest they should be
-# 2) Doesn't ensure that the chosen high card is one of the 5 cards that make up the best
-#    possible hand (only important for straights/flushes/other five card hands)
 calc_score = function(p) {
   suits = c("Clubs", "Hearts", "Spades", "Diamonds")
   ranks = c("2", "3", "4", "5", "6", "7", "8", "9", "10", "Jack", "Queen", "King", "Ace")
   highest = 0
+  high_card = 0
   straight = FALSE
   num_of_each_rank = rep(0, 13)
   num_of_each_suit = rep(0, 4)
@@ -151,7 +153,8 @@ calc_score = function(p) {
       if (2 %in% num_of_each_rank | length(which(num_of_each_rank == 3)) == 2) {
         # Full house
         rank_of_hand = max(which(num_of_each_rank %in% c(2,3))) + 1
-        highest = 84 + rank_of_hand
+        high_card = rank_of_hand
+        highest = 84 + high_card
       } else {
         # Three of a kind
         rank_of_three = max(which(num_of_each_rank == 3)) + 1
@@ -184,16 +187,19 @@ calc_score = function(p) {
     if (sum(straight_hand_ranks == flush_hand_ranks) == 13) {
       if (straight_hand_ranks[13] == 1) {
         # Royal Flush
+        high_card = 14
         highest=127
       } else {
         # Straight Flush
         rank_of_flush = max(which(straight_hand_ranks > 0)) + 1
-        highest = 112 + rank_of_flush
+        high_card = rank_of_flush
+        highest = 112 + high_card
       }
     } else if (highest < 57) {
       # Straight
       straight_rank = max(which(straight_hand_ranks > 0)) + 1
-      highest = 56 + straight_rank
+      high_card = straight_rank
+      highest = 56 + high_card
     }
   }
   # Scoring again looking at suits to check for flushes
@@ -202,12 +208,14 @@ calc_score = function(p) {
       # Regular flush
       flush_hand_ranks = get_flush_hand(p$hand, num_of_each_suit, suits, ranks)
       rank_of_flush = max(which(flush_hand_ranks == 1)) + 1
-      highest = 70 + rank_of_flush
+      high_card = rank_of_flush
+      highest = 70 + high_card
     }
   }
-  # Find high card to return with hand score for ties
-  high_card = max(which(num_of_each_rank > 0)) + 1
-  p$score = highest
+  # Updated players' score and high_card values to calculated values
+  if (high_card == 0) {
+    high_card = max(which(num_of_each_rank > 0)) + 1
+  }
   if (highest == 0) {
     p$score=high_card
   } else {
@@ -289,19 +297,20 @@ f = function(x) {
                                              score="numeric", high_card="numeric"))
   
   recorded_scores = rep(0,127)
+  p1 = player(hand=vector(), money=1000, score=0, high_card=0)
+  p2 = player(hand=vector(), money=1000, score=0, high_card=0)
+  p3 = player(hand=vector(), money=1000, score=0, high_card=0)
+  p4 = player(hand=vector(), money=1000, score=0, high_card=0)
+  p5 = player(hand=vector(), money=1000, score=0, high_card=0)
+  p6 = player(hand=vector(), money=1000, score=0, high_card=0)
+  p7 = player(hand=vector(), money=1000, score=0, high_card=0)
+  players = c(p1, p2, p3, p4, p5, p6, p7) 
   for(i in 1:10000) {
-    p1 = player(hand=vector(), money=1000, score=0, high_card=0)
-    p2 = player(hand=vector(), money=1000, score=0, high_card=0)
-    p3 = player(hand=vector(), money=1000, score=0, high_card=0)
-    p4 = player(hand=vector(), money=1000, score=0, high_card=0)
-    p5 = player(hand=vector(), money=1000, score=0, high_card=0)
-    p6 = player(hand=vector(), money=1000, score=0, high_card=0)
-    p7 = player(hand=vector(), money=1000, score=0, high_card=0)
-    players = c(p1, p2, p3, p4, p5, p6, p7) 
     d = deck(cards=shuffle_deck(make_deck()))
     for (p in players) {
       p$hand = draw(d,7)
       p$score = 0
+      p$high_card = 0
       calc_score(p)
       recorded_scores[p$score] = recorded_scores[p$score] + 1
     }
@@ -317,7 +326,7 @@ registerDoParallel(cl)
 
 start = Sys.time()
 # Currently will process 70,000 * length(x) hands - To change, alter i or players vector in f(x)
-recorded_scores = foreach(x = 1:10, .combine='+') %dopar% f(x)
+recorded_scores = foreach(x = 1:100, .combine='+') %dopar% f(x)
 end = Sys.time()
 end-start
 
