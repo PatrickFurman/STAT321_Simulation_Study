@@ -312,15 +312,16 @@ simulate_hand = function() {
 f = function(x) {
   deck = setRefClass("deck", fields=list(cards="vector"))
   player = setRefClass("player", fields=list(hand="vector", money="numeric",
-                                             score="numeric", high_card="numeric"))
+                                             score="numeric", high_card="numeric",
+                                             won="logical"))
   recorded_scores = rep(0,127)
-  p1 = player(hand=vector(), money=1000, score=0, high_card=0)
-  p2 = player(hand=vector(), money=1000, score=0, high_card=0)
-  p3 = player(hand=vector(), money=1000, score=0, high_card=0)
-  p4 = player(hand=vector(), money=1000, score=0, high_card=0)
-  p5 = player(hand=vector(), money=1000, score=0, high_card=0)
-  p6 = player(hand=vector(), money=1000, score=0, high_card=0)
-  p7 = player(hand=vector(), money=1000, score=0, high_card=0)
+  p1 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
+  p2 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
+  p3 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
+  p4 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
+  p5 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
+  p6 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
+  p7 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
   players = c(p1, p2, p3, p4, p5, p6, p7) 
   for(i in 1:10000) {
     d = deck(cards=shuffle_deck(make_deck()))
@@ -341,7 +342,7 @@ registerDoParallel(cl)
 
 start = Sys.time()
 # Currently will process 70,000 * length(x) hands - To change, alter i or players vector in f(x)
-recorded_scores = foreach(x = 1:10, .combine='+') %dopar% f(x)
+recorded_scores = foreach(x = 1:100, .combine='+') %dopar% f(x)
 end = Sys.time()
 end-start
 stopCluster(cl)
@@ -369,9 +370,6 @@ for (i in 1:length(ranks)) {
   }
 }
 
-df2 = data.frame(Total_Drawn = rep(0,91), Total_Win = rep(0,91),
-                 row.names=possible_hands)
-
 p1 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
 p2 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
 p3 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
@@ -380,26 +378,53 @@ p5 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
 p6 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
 p7 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
 players = c(p1, p2, p3, p4, p5, p6, p7) 
-for(i in 1:1000) {
-  simulate_hand()
-  for (p in players) {
-    temp = sub(" .*", "", p$hand[1:2])
-    recorded_hand = ""
-    if (which(temp[2] == ranks) > which(temp[1] == ranks)) {
-      recorded_hand = paste(temp[1], temp[2], sep=", ")
-    } else {
-      recorded_hand = paste(temp[2], temp[1], sep=", ")
-    }
-    df2[recorded_hand,"Total_Drawn"] = df2[recorded_hand,"Total_Drawn"] + 1
-    if (p$won) {
-      df2[recorded_hand,"Total_Win"] = df2[recorded_hand,"Total_Win"] + 1
+
+find_winning_hands = function(x, possible_hands) {
+  deck = setRefClass("deck", fields=list(cards="vector"))
+  player = setRefClass("player", fields=list(hand="vector", money="numeric",
+                                             score="numeric", high_card="numeric",
+                                             won="logical"))
+  df2 = data.frame(Total_Drawn = rep(0,91), Total_Win = rep(0,91),
+                   row.names=possible_hands)
+  for(i in 1:10000) {
+    simulate_hand()
+    for (p in players) {
+      temp = sub(" .*", "", p$hand[1:2])
+      recorded_hand = ""
+      if (which(temp[2] == ranks) > which(temp[1] == ranks)) {
+        recorded_hand = paste(temp[1], temp[2], sep=", ")
+      } else {
+        recorded_hand = paste(temp[2], temp[1], sep=", ")
+      }
+      df2[recorded_hand,"Total_Drawn"] = df2[recorded_hand,"Total_Drawn"] + 1
+      if (p$won) {
+        df2[recorded_hand,"Total_Win"] = df2[recorded_hand,"Total_Win"] + 1
+      }
     }
   }
+  return(df2)
 }
+
+combine = function(dfa, dfb) {
+  return(dfa + dfb)
+}
+
+num_cores = detectCores()
+cl = makeCluster(num_cores - 2)
+registerDoParallel(cl)
+
+start = Sys.time()
+# Currently will process 70,000 * length(x) hands - To change, alter i or players vector in f(x)
+df2 = foreach(x = 1:100, .combine=combine) %dopar% find_winning_hands(x, possible_hands)
+end = Sys.time()
+end-start
+stopCluster(cl)
 
 # Adding column to df2 for percent likelihood to win based on starting hand
 df2["Percent_Win"] = df2["Total_Win"] / df2["Total_Drawn"] * 100
 df2[order(df2$Percent_Win),]
+
+
 
 
 # Betting High vs. Betting Low --------------------------------------------
