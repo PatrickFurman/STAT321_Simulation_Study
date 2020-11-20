@@ -1,15 +1,13 @@
 ### Poker Simulation Study
 ### Note: not attached to any of the current code, feel free to delete/change whatever
 
-
-
-
-
-
+library(foreach)
+library(doParallel)
 
 deck = setRefClass("deck", fields=list(cards="vector"))
 player = setRefClass("player", fields=list(hand="vector", money="numeric",
-                                           score="numeric", high_card="numeric"))
+                                           score="numeric", high_card="numeric",
+                                           won="logical"))
 
 # Function to take existing deck and randomly order all cards
 shuffle_deck = function(deck) {
@@ -237,15 +235,28 @@ update_money = Vectorize(function(p, amount) {
   return(p$money)
 })
 
+# Sets won to true for all players in winners and false for others
+update_winner_status = function(players, winners) {
+  for (p in players) {
+    for (w in winners) {
+      if (sum(p$hand == w$hand) == 7) {
+        p$won = TRUE
+      } else {
+        p$won = FALSE
+      }
+    }
+  }
+}
+
 # Setting up players (went with 7 to avoid dealing with situation where
 # it's possible to run out of cards)
-p1 = player(hand=vector(), money=1000, score=0, high_card=0)
-p2 = player(hand=vector(), money=1000, score=0, high_card=0)
-p3 = player(hand=vector(), money=1000, score=0, high_card=0)
-p4 = player(hand=vector(), money=1000, score=0, high_card=0)
-p5 = player(hand=vector(), money=1000, score=0, high_card=0)
-p6 = player(hand=vector(), money=1000, score=0, high_card=0)
-p7 = player(hand=vector(), money=1000, score=0, high_card=0)
+p1 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
+p2 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
+p3 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
+p4 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
+p5 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
+p6 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
+p7 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
 players = c(p1, p2, p3, p4, p5, p6, p7) 
 
 # Simulating a single hand of seven-card stud poker
@@ -291,6 +302,8 @@ simulate_hand = function() {
   # Award pot to winner(s)
   per_player = pot / length(winners)
   update_money(winners, per_player)
+  
+  update_winner_status(players, winners)
 }
 
 # Frequency of Each Type of Hand ------------------------------------------
@@ -322,8 +335,6 @@ f = function(x) {
   return(recorded_scores)
 }
 
-library(foreach)
-library(doParallel)
 num_cores = detectCores()
 cl = makeCluster(num_cores - 2)
 registerDoParallel(cl)
@@ -333,6 +344,7 @@ start = Sys.time()
 recorded_scores = foreach(x = 1:10, .combine='+') %dopar% f(x)
 end = Sys.time()
 end-start
+stopCluster(cl)
 
 recorded_hands = c("0"=0, "1"=0, "2"=0, "3"=0, "4"=0, "5"=0, "6"=0, "7"=0, "8"=0, "9"=0)
 for (i in 0:8) {
@@ -349,7 +361,45 @@ format(df, scientific=FALSE)
 
 # Probability of Winning Based on Cards in the Hole -----------------------
 
+ranks = c("2", "3", "4", "5", "6", "7", "8", "9", "10", "Jack", "Queen", "King", "Ace")
+possible_hands = c()
+for (i in 1:length(ranks)) {
+  for (rank in ranks[i:length(ranks)]) {
+    possible_hands = append(possible_hands, paste(ranks[i], rank, sep=", "))
+  }
+}
 
+df2 = data.frame(Total_Drawn = rep(0,91), Total_Win = rep(0,91),
+                 row.names=possible_hands)
+
+p1 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
+p2 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
+p3 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
+p4 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
+p5 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
+p6 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
+p7 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
+players = c(p1, p2, p3, p4, p5, p6, p7) 
+for(i in 1:1000) {
+  simulate_hand()
+  for (p in players) {
+    temp = sub(" .*", "", p$hand[1:2])
+    recorded_hand = ""
+    if (which(temp[2] == ranks) > which(temp[1] == ranks)) {
+      recorded_hand = paste(temp[1], temp[2], sep=", ")
+    } else {
+      recorded_hand = paste(temp[2], temp[1], sep=", ")
+    }
+    df2[recorded_hand,"Total_Drawn"] = df2[recorded_hand,"Total_Drawn"] + 1
+    if (p$won) {
+      df2[recorded_hand,"Total_Win"] = df2[recorded_hand,"Total_Win"] + 1
+    }
+  }
+}
+
+# Adding column to df2 for percent likelihood to win based on starting hand
+df2["Percent_Win"] = df2["Total_Win"] / df2["Total_Drawn"] * 100
+df2[order(df2$Percent_Win),]
 
 
 # Betting High vs. Betting Low --------------------------------------------
