@@ -3,12 +3,16 @@
 
 library(foreach)
 library(doParallel)
+library(ggplot2)
 
+# Defining Classes --------------------------------------------------------
 deck = setRefClass("deck", fields=list(cards="vector"))
 player = setRefClass("player", fields=list(hand="vector", money="numeric",
                                            score="numeric", high_card="numeric",
-                                           won="logical"))
+                                           won="logical", aggressive="logical",
+                                           betting="logical", bet="numeric"))
 
+# Deck Management Functions -----------------------------------------------
 # Function to take existing deck and randomly order all cards
 shuffle_deck = function(deck) {
   # Goes through the deck card by card and swap each with a randomly selected card
@@ -61,11 +65,56 @@ deal_all = function(deck, n = 1) {
   }
 }
 
+# Player Management Functions ----------------------------------------------
+# Increases/decreases money field of provided player object by amount
+# If a list of players is passed, they're all modified by amount
+# NOTE: must pass as players[i] not just p1 - will return an error (not sure why)
+update_money = Vectorize(function(p, amount) {
+  p$money = p$money + amount
+  return(p$money)
+})
+
+# Sets won to true for all players in winners and false for others
+update_winner_status = function(players, winners) {
+  for (p in players) {
+    for (w in winners) {
+      if (sum(p$hand == w$hand) == 7) {
+        p$won = TRUE
+      } else {
+        p$won = FALSE
+      }
+    }
+  }
+}
+
+
+
+# Misc Functions ----------------------------------------------------------
+# Combine function for foreach loops in analysis. Just adds the values of 
+# two dataframes together
+combine_df = function(dfa, dfb) {
+  return(dfa + dfb)
+}
+
+# Returns a formated and ordered string with the ranks of the first two cards
+# in player's hand. For use in prob based on starting cards section. Ex. "Ace, 8"
+two_card_hand = function(p) {
+  temp = sub(" .*", "", p$hand[1:2])
+  recorded_hand = ""
+  if (which(temp[2] == ranks) > which(temp[1] == ranks)) {
+    recorded_hand = paste(temp[1], temp[2], sep=", ")
+  } else {
+    recorded_hand = paste(temp[2], temp[1], sep=", ")
+  }
+  return(recorded_hand)
+}
+# Scoring Logic -----------------------------------------------------------
+
 # Helper function for calc_score that uses a vector of how many cards of each rank
 # are in a hand to determine if those cards form a straight
 contains_straight = function(ranks) {
   has_rank = which(ranks > 0)
-  if (length(has_rank) == 0) {
+  if (length(has_rank) < 5) {
     return(FALSE)
   }
   temp = has_rank[1]
@@ -126,7 +175,7 @@ get_flush_hand = function(full_hand, num_of_each_suit, suits, ranks) {
 }
 
 # Calculate the score of a players' hand
-# Score is returned as a two element vector with hand score and high card
+# Score and high_card are not returned but provided player's fields are updated
 calc_score = function(p) {
   suits = c("Clubs", "Hearts", "Spades", "Diamonds")
   ranks = c("2", "3", "4", "5", "6", "7", "8", "9", "10", "Jack", "Queen", "King", "Ace")
@@ -173,7 +222,7 @@ calc_score = function(p) {
         highest = 14 + rank_of_pair
       }
     }
-  } else {
+  } else if (of_a_kind != 0) {
     # 4 of a kind
     rank_of_four = max(which(num_of_each_rank == 4)) + 1
     highest = 98 + rank_of_four
@@ -227,56 +276,179 @@ calc_score = function(p) {
   p$high_card=high_card
 }
 
-# Increases/decreases money field of provided player object by amount
-# If a list of players is passed, they're all modified by amount
-# NOTE: must pass as players[i] not just p1 - will return an error (not sure why)
-update_money = Vectorize(function(p, amount) {
-  p$money = p$money + amount
-  return(p$money)
-})
-
-# Sets won to true for all players in winners and false for others
-update_winner_status = function(players, winners) {
+# Betting Logic -----------------------------------------------------------
+# Creates a new vector of players by ordering the provided players vector in 
+# either ascending or descending order based on their score
+order_by_score = function(players, ascending=FALSE) {
+  reordered = c()
   for (p in players) {
-    for (w in winners) {
-      if (sum(p$hand == w$hand) == 7) {
-        p$won = TRUE
+    calc_score(p)
+  }
+  reordered = append(reordered, players[[1]])
+  for (i in 2:length(players)) {
+    placed = FALSE
+    for (j in 1:length(reordered)) {
+      if (reordered[[j]]$score > players[[i]]$score & ascending) {
+        reordered = append(append(reordered[0:(j-1)],c(players[[i]])),reordered[j:length(reordered)])
+        placed = TRUE
+        break
+      } else if (reordered[[j]]$score < players[[i]]$score & !ascending) {
+        reordered = append(append(reordered[0:(j-1)],c(players[[i]])),reordered[j:length(reordered)])
+        placed = TRUE
+        break
+      }
+    }
+    if (!placed) {
+      reordered = append(reordered, players[[i]])
+    }
+  }
+  return(reordered)
+}
+
+# Returns -1 for fold, 0 for check, curr_bet if call, else raise
+determine_bet = function(players, p, buy_in, curr_bet) {
+  if (p$money < curr_bet / 2) {
+    # Fold right away if player doesn't have enough money to meaningfully bet
+    p$betting = FALSE
+    return(-1)
+  }
+  high_bet = buy_in / 50
+  low_bet = high_bet / 2
+  
+  # Probability of each action based on score of current hand
+  # By element the numbers represent:
+  # P(fold), P(call), P(raise)
+  bad_hand_prob  = c(.65, .30, .05)
+  avg_hand_prob  = c(.15, .75, .10)
+  good_hand_prob = c(.05, .30, .65)
+
+  # Choose action based on score and above probability vectors
+  avg_by_turn = c(14, 17, 20, 25, 32) # Values from avg score by hand size section rounded up
+  avg_for_turn = avg_by_turn[length(p$hand)-2]
+  if (p$score < avg_for_turn) {
+    return(bet_hand_type(p, bad_hand_prob, curr_bet, buy_in))
+  } else if (p$score > avg_for_turn * 2) {
+    return(bet_hand_type(p, good_hand_prob, curr_bet, buy_in))
+  } else {
+    return(bet_hand_type(p, avg_hand_prob, curr_bet, buy_in))
+  }
+}
+
+bet_hand_type = function(p, prob, curr_bet, buy_in, x = runif(1)) {
+  high_bet = buy_in / 50
+  low_bet = high_bet / 2
+  if (x < prob[1] & curr_bet != 0) {
+    # Fold
+    p$betting = FALSE
+    return(-1)
+  } else if (x < prob[1] + prob[2]) {
+    # Call
+    if (p$money >= curr_bet) {
+      p$bet = curr_bet
+      return(curr_bet)
+    } else {
+      p$bet = p$money
+      return(p$money)
+    }
+  } else {
+    # Raise
+    if (p$aggressive) {
+      if (p$money >= curr_bet + high_bet) {
+        p$bet = curr_bet + high_bet
+        return(curr_bet + high_bet)
       } else {
-        p$won = FALSE
+        # Call if not enough money to raise
+        return(bet_hand_type(p, prob, curr_bet, buy_in, x = (prob[1] + prob[2] - .01)))
+      }
+    } else {
+      if (p$money >= curr_bet + low_bet) {
+        p$bet = curr_bet + low_bet
+        return(curr_bet + low_bet)
+      } else {
+        # Call if not enough money to raise
+        return(bet_hand_type(p, prob, curr_bet, buy_in, x = (prob[1] + prob[2] - .01)))
       }
     }
   }
 }
 
-# Setting up players (went with 7 to avoid dealing with situation where
-# it's possible to run out of cards)
-p1 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
-p2 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
-p3 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
-p4 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
-p5 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
-p6 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
-p7 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
-players = c(p1, p2, p3, p4, p5, p6, p7) 
+# Goes through list of players twice, once to determine their initial bet and then
+# a second time to see if players need to call if their first bet was lower than 
+# a later player's bet. Returns the total of all bets made to be added to the pot.
+# Also updates the money of betting players within the function and removes players
+# from the hand if they fold
+round_of_betting = function(players, buy_in, ascending = FALSE) {
+  round_pot = 0
+  current_bet = 0
+  i = 1
+  player_order = order_by_score(players, ascending)
+  for (p in player_order) {
+    if (p$betting) {
+      bet = determine_bet(players, p, buy_in, current_bet)
+      if (bet > 0) {
+        current_bet = bet
+        update_money(players[i], bet * -1)
+        round_pot = round_pot + bet
+      }
+    }
+    i = i + 1
+  }
+  # Second go through to check if players need to call - not given option to raise
+  x = runif(1)
+  i = 1
+  for (p in player_order) {
+    if (p$betting) {
+       if (p$bet < current_bet & p$money >= current_bet & 
+           ((p$aggressive & x < .8) | (!p$aggressive & x < .66))) {
+         update_money(players[i], (current_bet - p$bet) * -1)
+         round_pot = round_pot + current_bet - p$bet
+       } else if (p$bet != current_bet) {
+         # Fold
+         p$betting = FALSE
+       }
+    }
+    i = i + 1
+  }
+  return(round_pot)
+}
 
-# Simulating a single hand of seven-card stud poker
+# Simulating a single hand of seven-card stud poker -----------------------
 simulate_hand = function() {
   # Initialize deck and player's hands
   d = deck(cards=shuffle_deck(make_deck()))
+  buy_in = 200
+  betting_players = 0
+  pot = 0
+  i = 1
   for (p in players) {
-    p$score = 0 # Reset score after each round
-    p$hand = vector() # Reset hand after each round
+    p$score = 0
+    p$high_card = 0
+    p$hand = vector()
+    if (p$money < 1) {
+      p$betting = FALSE
+    } else {
+      p$betting = TRUE
+      # Ante cost for each player
+      update_money(players[1], -1)
+      betting_players = betting_players + 1
+    }
+    p$bet = 0
+    i = i + 1
   }
+  # Add antes from above into pot
+  pot = pot + betting_players
+  
   deal_all(d,3) # Deal two face down cards plus one face up to each player
-  pot = 100
+  
+  
   
   # Initial betting - starting with lowest valued shown card
+  pot = pot + round_of_betting(players, buy_in, ascending=TRUE)
   
   # Repeat betting and dealing cycle 3 times (third-sixth streets)
   for (i in 1:3) {
-    # Scoring? (to inform bets)
-    
     # Betting - starting with highest valued shown hand
+    pot = pot + round_of_betting(players, buy_in)
     
     # Dealing everyone another card
     deal_all(d)
@@ -286,14 +458,19 @@ simulate_hand = function() {
   deal_all(d)
   
   # Final bets
+  pot = pot + round_of_betting(players, buy_in)
   
   # Calculate hands and determine winner
   scores = vector(mode="numeric", length=length(players))
   high_cards = vector(mode="numeric", length=length(players))
   for (p in 1:length(players)) {
-    calc_score(players[[p]])
-    high_cards[p] = players[[p]]$high_card
-    scores[p] = players[[p]]$score
+    if (players[[p]]$betting) {
+      high_cards[p] = players[[p]]$high_card
+      scores[p] = players[[p]]$score
+    } else {
+      high_cards[p] = 0
+      scores[p] = 0
+    }
   }
   # Vector of winning player(s)
   ties = which(scores==(max(scores)))
@@ -306,6 +483,85 @@ simulate_hand = function() {
   update_winner_status(players, winners)
 }
 
+sim_hand_without_betting = function() {
+  d = deck(cards=shuffle_deck(make_deck()))
+  for (p in players) {
+    p$score = 0
+    p$high_card = 0
+    p$hand = draw(d, 7)
+    calc_score(p)
+  }
+  # Calculate hands and determine winner
+  scores = vector(mode="numeric", length=length(players))
+  high_cards = vector(mode="numeric", length=length(players))
+  for (p in 1:length(players)) {
+    high_cards[p] = players[[p]]$high_card
+    scores[p] = players[[p]]$score
+  }
+  # Vector of winning player(s)
+  ties = which(scores==(max(scores)))
+  winners = players[c(ties[which(high_cards[c(ties)]==(max(high_cards[c(ties)])))])]
+  
+  update_winner_status(players, winners)
+}
+# Average Score Based on Number of Cards in Hand --------------------------
+
+# Scores players' hands when they have 1:10 cards and records their score
+# for each hand size
+avg_score = function(x) {
+  deck = setRefClass("deck", fields=list(cards="vector"))
+  player = setRefClass("player", fields=list(hand="vector", money="numeric",
+                                             score="numeric", high_card="numeric",
+                                             won="logical", aggressive="logical"))
+  scores = data.frame(Hand_Size_1 = rep(0,127), Hand_Size_2 = rep(0,127),
+                      Hand_Size_3 = rep(0,127), Hand_Size_4 = rep(0,127),
+                      Hand_Size_5 = rep(0,127), Hand_Size_6 = rep(0,127),
+                      Hand_Size_7 = rep(0,127), Hand_Size_8 = rep(0,127),
+                      Hand_Size_9 = rep(0,127), Hand_Size_10 = rep(0,127),row.names=1:127)
+  p1 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE, aggressive=FALSE)
+  p2 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE, aggressive=FALSE)
+  p3 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE, aggressive=FALSE)
+  p4 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE, aggressive=FALSE)
+  p5 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE, aggressive=FALSE)
+  players = c(p1, p2, p3, p4, p5) 
+  for(i in 1:10000) {
+    d = deck(cards=shuffle_deck(make_deck()))
+    for (p in players) {
+      p$score = 0
+      p$high_card = 0
+      p$hand = vector()
+    }
+    for (i in 1:10) {
+      for (p in players) {
+        p$hand = append(p$hand, draw(d,1))
+        calc_score(p)
+        hand_size = paste("Hand_Size_", i, sep="")
+        scores[p$score, hand_size] = scores[p$score, hand_size] + 1
+      }
+    }
+  }
+  return(scores)
+}
+
+num_cores = detectCores()
+cl = makeCluster(num_cores - 1)
+registerDoParallel(cl)
+
+start = Sys.time()
+# Currently will process 50,000 * length(x) hands - To change, alter i or players vector in avg_score(x)
+scores_by_turn = foreach(x = 1:100, .combine=combine_df) %dopar% avg_score(x)
+end = Sys.time()
+end-start
+stopCluster(cl)
+
+# Plotting data
+for (i in 1:10) {
+  avg = mean(scores_by_turn[,i] / sum(scores_by_turn[,i]) * c(1:127) * 127)
+  title = paste("Frequency of Scores Given a", i, "Card Hand")
+  print(ggplot(data=scores_by_turn, aes(x=1:127, y=scores_by_turn[,i], col="red")) + xlab("Score") + 
+    ylab("Frequency") + ggtitle(title) + geom_line() + geom_vline(xintercept=avg))
+}
+
 # Frequency of Each Type of Hand ------------------------------------------
 
 # Creates 70,000 hands, scores them and returns results in a vector
@@ -313,15 +569,15 @@ f = function(x) {
   deck = setRefClass("deck", fields=list(cards="vector"))
   player = setRefClass("player", fields=list(hand="vector", money="numeric",
                                              score="numeric", high_card="numeric",
-                                             won="logical"))
+                                             won="logical", aggressive="logical"))
   recorded_scores = rep(0,127)
-  p1 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
-  p2 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
-  p3 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
-  p4 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
-  p5 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
-  p6 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
-  p7 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
+  p1 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE, aggressive=FALSE)
+  p2 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE, aggressive=FALSE)
+  p3 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE, aggressive=FALSE)
+  p4 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE, aggressive=FALSE)
+  p5 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE, aggressive=FALSE)
+  p6 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE, aggressive=FALSE)
+  p7 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE, aggressive=FALSE)
   players = c(p1, p2, p3, p4, p5, p6, p7) 
   for(i in 1:10000) {
     d = deck(cards=shuffle_deck(make_deck()))
@@ -337,7 +593,7 @@ f = function(x) {
 }
 
 num_cores = detectCores()
-cl = makeCluster(num_cores - 2)
+cl = makeCluster(num_cores - 1)
 registerDoParallel(cl)
 
 start = Sys.time()
@@ -362,6 +618,7 @@ format(df, scientific=FALSE)
 
 # Probability of Winning Based on Cards in the Hole -----------------------
 
+# Every possible two card hand (where order doesn't matter)
 ranks = c("2", "3", "4", "5", "6", "7", "8", "9", "10", "Jack", "Queen", "King", "Ace")
 possible_hands = c()
 for (i in 1:length(ranks)) {
@@ -370,32 +627,29 @@ for (i in 1:length(ranks)) {
   }
 }
 
-p1 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
-p2 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
-p3 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
-p4 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
-p5 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
-p6 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
-p7 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE)
+p1 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE, aggressive=FALSE)
+p2 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE, aggressive=FALSE)
+p3 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE, aggressive=FALSE)
+p4 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE, aggressive=FALSE)
+p5 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE, aggressive=FALSE)
+p6 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE, aggressive=FALSE)
+p7 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE, aggressive=FALSE)
 players = c(p1, p2, p3, p4, p5, p6, p7) 
 
+# Simulates 10000 hands without taking into account betting/folding so every player's
+# cards are scored in each hand, then counts the number of times each type of hand
+# was drawn and if it won
 find_winning_hands = function(x, possible_hands) {
   deck = setRefClass("deck", fields=list(cards="vector"))
   player = setRefClass("player", fields=list(hand="vector", money="numeric",
                                              score="numeric", high_card="numeric",
-                                             won="logical"))
+                                             won="logical", aggressive="logical"))
   df2 = data.frame(Total_Drawn = rep(0,91), Total_Win = rep(0,91),
                    row.names=possible_hands)
   for(i in 1:10000) {
-    simulate_hand()
+    sim_hand_without_betting()
     for (p in players) {
-      temp = sub(" .*", "", p$hand[1:2])
-      recorded_hand = ""
-      if (which(temp[2] == ranks) > which(temp[1] == ranks)) {
-        recorded_hand = paste(temp[1], temp[2], sep=", ")
-      } else {
-        recorded_hand = paste(temp[2], temp[1], sep=", ")
-      }
+      recorded_hand = two_card_hand(p)
       df2[recorded_hand,"Total_Drawn"] = df2[recorded_hand,"Total_Drawn"] + 1
       if (p$won) {
         df2[recorded_hand,"Total_Win"] = df2[recorded_hand,"Total_Win"] + 1
@@ -405,17 +659,14 @@ find_winning_hands = function(x, possible_hands) {
   return(df2)
 }
 
-combine = function(dfa, dfb) {
-  return(dfa + dfb)
-}
-
 num_cores = detectCores()
-cl = makeCluster(num_cores - 2)
+cl = makeCluster(num_cores - 1)
 registerDoParallel(cl)
 
 start = Sys.time()
-# Currently will process 70,000 * length(x) hands - To change, alter i or players vector in f(x)
-df2 = foreach(x = 1:100, .combine=combine) %dopar% find_winning_hands(x, possible_hands)
+# Currently will process 70,000 * length(x) hands
+# To change, alter i or players vector in find_winning_hands(x)
+df2 = foreach(x = 1:100, .combine=combine_df) %dopar% find_winning_hands(x, possible_hands)
 end = Sys.time()
 end-start
 stopCluster(cl)
@@ -428,5 +679,76 @@ df2[order(df2$Percent_Win),]
 
 
 # Betting High vs. Betting Low --------------------------------------------
+# Initializing players to have half of them bet high and the other half bet low
+p1 = player(hand=vector(), money=5000, score=0, high_card=0, won=FALSE,
+            aggressive=TRUE, betting=TRUE, bet=0)
+p2 = player(hand=vector(), money=5000, score=0, high_card=0, won=FALSE,
+            aggressive=TRUE, betting=TRUE, bet=0)
+p3 = player(hand=vector(), money=5000, score=0, high_card=0, won=FALSE,
+            aggressive=TRUE, betting=TRUE, bet=0)
+p4 = player(hand=vector(), money=5000, score=0, high_card=0, won=FALSE,
+            aggressive=FALSE, betting=TRUE, bet=0)
+p5 = player(hand=vector(), money=5000, score=0, high_card=0, won=FALSE,
+            aggressive=FALSE, betting=TRUE, bet=0)
+p6 = player(hand=vector(), money=5000, score=0, high_card=0, won=FALSE,
+            aggressive=FALSE, betting=TRUE, bet=0)
+players = c(p1, p2, p3, p4, p5, p6) 
+
+# Simulates reps games where each game is 200 hands long and then records
+# the amount of money each player won or lost
+betting_high = function(x, reps) {
+  deck = setRefClass("deck", fields=list(cards="vector"))
+  player = setRefClass("player", fields=list(hand="vector", money="numeric",
+                                             score="numeric", high_card="numeric",
+                                             won="logical", aggressive="logical",
+                                             betting="logical", bet="numeric"))
+  
+  df = data.frame(Player1 = rep(0,reps), Player2 = rep(0,reps), Player3 = rep(0,reps),
+                  Player4 = rep(0,reps), Player5 = rep(0,reps), Player6 = rep(0,reps))
+  for (i in 1:reps) {
+    replicate(200, simulate_hand())
+    values = rep(0, 6)
+    j = 1
+    for (p in players) {
+      values[j] = p$money - 5000
+      p$money = 5000
+      j = j + 1
+    }
+    df[i,] = values
+  }
+  print(x)
+  return(df)
+}
+
+num_cores = detectCores()
+cl = makeCluster(num_cores - 1)
+registerDoParallel(cl)
+
+start = Sys.time()
+# Currently will process 6 * length(x) * reps games
+recorded_money = foreach(x = 1:100, .combine='rbind') %dopar% betting_high(x, 10)
+end = Sys.time()
+end-start
+stopCluster(cl)
+
+# Grouping and plotting data
+high_bet_results = append(append(recorded_money$Player1,recorded_money$Player2),recorded_money$Player3)
+low_bet_results = append(append(recorded_money$Player4,recorded_money$Player5),recorded_money$Player6)
+all_results = append(high_bet_results,low_bet_results)
+x_min = min(all_results)
+x_max = max(all_results)
+
+ggplot(data = NULL, aes(x=high_bet_results)) + geom_histogram(binwidth=50) + 
+  xlab("Difference in money after 200 hands") + 
+  ggtitle("Difference in money after 200 hands when betting high") +
+  scale_x_continuous(limits=c(x_min, x_max)) + 
+  scale_y_continuous(limits=c(0, 250))
+
+ggplot(data = NULL, aes(x=low_bet_results)) + geom_histogram(binwidth=50) + 
+  xlab("Difference in money after 200 hands") + 
+  ggtitle("Difference in money after 200 hands when betting low") +
+  scale_x_continuous(limits=c(x_min, x_max)) +
+  scale_y_continuous(limits=c(0, 250))
+
 
 
