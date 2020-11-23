@@ -726,7 +726,7 @@ registerDoParallel(cl)
 
 start = Sys.time()
 # Currently will process 6 * length(x) * reps games
-recorded_money = foreach(x = 1:100, .combine='rbind') %dopar% betting_high(x, 10)
+recorded_money = foreach(x = 1:100, .combine='rbind') %dopar% betting_high(x, 20)
 end = Sys.time()
 end-start
 stopCluster(cl)
@@ -737,18 +737,18 @@ low_bet_results = append(append(recorded_money$Player4,recorded_money$Player5),r
 all_results = append(high_bet_results,low_bet_results)
 x_min = min(all_results)
 x_max = max(all_results)
+bins = ceiling((x_max + abs(x_min)) / 50)
+expect_win_high = mean(high_bet_results)
+expect_win_low = mean(low_bet_results)
 
-ggplot(data = NULL, aes(x=high_bet_results)) + geom_histogram(binwidth=50) + 
-  xlab("Difference in money after 200 hands") + 
-  ggtitle("Difference in money after 200 hands when betting high") +
-  scale_x_continuous(limits=c(x_min, x_max)) + 
-  scale_y_continuous(limits=c(0, 250))
+hist(low_bet_results, breaks=bins, xlim=c(x_min, x_max), ylim=c(0,500),
+     xlab="Difference in money after 200 hands", main="Average Difference in 
+     Money After 200 Hands When Betting Low")
+abline(v=expect_win_low, col="red")
 
-ggplot(data = NULL, aes(x=low_bet_results)) + geom_histogram(binwidth=50) + 
-  xlab("Difference in money after 200 hands") + 
-  ggtitle("Difference in money after 200 hands when betting low") +
-  scale_x_continuous(limits=c(x_min, x_max)) +
-  scale_y_continuous(limits=c(0, 250))
-
+hist(high_bet_results, breaks=bins, xlim=c(x_min, x_max), ylim=c(0,500),
+     xlab="Difference in money after 200 hands", main="Average Difference in 
+     Money After 200 Hands When Betting High")
+abline(v=expect_win_high, col="red")
 
 
