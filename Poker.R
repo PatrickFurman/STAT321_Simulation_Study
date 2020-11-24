@@ -726,7 +726,7 @@ registerDoParallel(cl)
 
 start = Sys.time()
 # Currently will process 6 * length(x) * reps games
-recorded_money = foreach(x = 1:100, .combine='rbind') %dopar% betting_high(x, 20)
+recorded_money = foreach(x = 1:100, .combine='rbind') %dopar% betting_high(x, 100)
 end = Sys.time()
 end-start
 stopCluster(cl)
@@ -741,14 +741,60 @@ bins = ceiling((x_max + abs(x_min)) / 50)
 expect_win_high = mean(high_bet_results)
 expect_win_low = mean(low_bet_results)
 
-hist(low_bet_results, breaks=bins, xlim=c(x_min, x_max), ylim=c(0,500),
+hist(low_bet_results, breaks=bins, xlim=c(x_min, x_max), ylim=c(0,2100),
      xlab="Difference in money after 200 hands", main="Average Difference in 
      Money After 200 Hands When Betting Low")
 abline(v=expect_win_low, col="red")
 
-hist(high_bet_results, breaks=bins, xlim=c(x_min, x_max), ylim=c(0,500),
+hist(high_bet_results, breaks=bins, xlim=c(x_min, x_max), ylim=c(0,2100),
      xlab="Difference in money after 200 hands", main="Average Difference in 
      Money After 200 Hands When Betting High")
 abline(v=expect_win_high, col="red")
 
 
+
+# Animating a hand of poker -----------------------------------------------
+
+# Re-calculates player scores and updates graphs to reflect current money 
+# and score values
+update_display = function(num_cards) {
+  score_data = data.frame(Scores=rep(0, length(players)))
+  names = vector(mode="character", length=length(players))
+  for (p in 1:length(players)) {
+    calc_score(players[[p]])
+    score_data[p,"Scores"] = players[[p]]$score
+    names[p] = paste("Player", p)
+  }
+  print(ggplot(data=score_data, aes(x = names, y=Scores)) + geom_col() + 
+    ggtitle(paste("Players' Scores With", num_cards, "Cards in Hand")) + 
+    xlab("Player Name") + ylab("Score"))
+  Sys.sleep(.75)
+}
+
+# Simulates a single hand without betting and updating display after each
+# card is drawn/hand is won
+animate_hand = function() {
+  for (p in players) {
+    p$score = 0
+    p$high_card = 0
+    p$hand = vector()
+  }
+  d = deck(cards=shuffle_deck(make_deck()))
+  deal_all(d, 3)
+  update_display(3)
+  
+  for (i in 1:4) {
+    deal_all(d)
+    update_display(3+i)
+  }
+}
+
+p1 = player(hand=vector(), money=5000, score=0, high_card=0, won=FALSE,
+            aggressive=TRUE, betting=TRUE, bet=0)
+p2 = player(hand=vector(), money=5000, score=0, high_card=0, won=FALSE,
+            aggressive=TRUE, betting=TRUE, bet=0)
+players = c(p1, p2)
+for (i in 1:10) {
+  animate_hand()
+  Sys.sleep(2)
+}
