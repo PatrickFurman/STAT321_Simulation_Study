@@ -10,7 +10,8 @@ deck = setRefClass("deck", fields=list(cards="vector"))
 player = setRefClass("player", fields=list(hand="vector", money="numeric",
                                            score="numeric", high_card="numeric",
                                            won="logical", aggressive="logical",
-                                           betting="logical", bet="numeric"))
+                                           betting="logical", bet="numeric",
+                                           total_wins="numeric", neutral="logical"))
 
 
 
@@ -79,13 +80,11 @@ update_money = Vectorize(function(p, amount) {
 # Sets won to true for all players in winners and false for others
 update_winner_status = function(players, winners) {
   for (p in players) {
-    for (w in winners) {
-      if (sum(p$hand == w$hand) == 7) {
-        p$won = TRUE
-      } else {
-        p$won = FALSE
-      }
-    }
+    p$won = FALSE
+  }
+  for (w in winners) {
+    w$won = TRUE
+    w$total_wins = w$total_wins + 1
   }
 }
 
@@ -363,12 +362,24 @@ bet_hand_type = function(p, prob, curr_bet, buy_in, x = runif(1)) {
         return(bet_hand_type(p, prob, curr_bet, buy_in, x = (prob[1] + prob[2] - .01)))
       }
     } else {
-      if (p$money >= curr_bet + low_bet) {
-        p$bet = curr_bet + low_bet
-        return(curr_bet + low_bet)
-      } else {
-        # Call if not enough money to raise
-        return(bet_hand_type(p, prob, curr_bet, buy_in, x = (prob[1] + prob[2] - .01)))
+      if (p$neutral) {
+        avg_bet = (low_bet + high_bet) / 2
+        if (p$money >= curr_bet + avg_bet) {
+          p$bet = curr_bet + avg_bet
+          return(curr_bet + avg_bet)
+        } else {
+          # Call if not enough money to raise
+          return(bet_hand_type(p, prob, curr_bet, buy_in, x = (prob[1] + prob[2] - .01)))
+        }
+      }
+      else {
+        if (p$money >= curr_bet + low_bet) {
+          p$bet = curr_bet + low_bet
+          return(curr_bet + low_bet)
+        } else {
+          # Call if not enough money to raise
+          return(bet_hand_type(p, prob, curr_bet, buy_in, x = (prob[1] + prob[2] - .01)))
+        }
       }
     }
   }
@@ -680,20 +691,20 @@ df2[order(df2$Percent_Win),]
 
 
 
-# Betting High vs. Betting Low --------------------------------------------
-# Initializing players to have half of them bet high and the other half bet low
+# Betting High vs. Betting Low vs. Betting Neutral ------------------------
+# Initializing players to have first 2 bet high, second 2 bet avg, third 2 bet low
 p1 = player(hand=vector(), money=5000, score=0, high_card=0, won=FALSE,
-            aggressive=TRUE, betting=TRUE, bet=0)
+            aggressive=TRUE, betting=TRUE, bet=0, total_wins=0, neutral=FALSE)
 p2 = player(hand=vector(), money=5000, score=0, high_card=0, won=FALSE,
-            aggressive=TRUE, betting=TRUE, bet=0)
+            aggressive=TRUE, betting=TRUE, bet=0, total_wins=0, neutral=FALSE)
 p3 = player(hand=vector(), money=5000, score=0, high_card=0, won=FALSE,
-            aggressive=TRUE, betting=TRUE, bet=0)
+            aggressive=FALSE, betting=TRUE, bet=0, total_wins=0, neutral=TRUE)
 p4 = player(hand=vector(), money=5000, score=0, high_card=0, won=FALSE,
-            aggressive=FALSE, betting=TRUE, bet=0)
+            aggressive=FALSE, betting=TRUE, bet=0, total_wins=0, neutral=TRUE)
 p5 = player(hand=vector(), money=5000, score=0, high_card=0, won=FALSE,
-            aggressive=FALSE, betting=TRUE, bet=0)
+            aggressive=FALSE, betting=TRUE, bet=0, total_wins=0, neutral=FALSE)
 p6 = player(hand=vector(), money=5000, score=0, high_card=0, won=FALSE,
-            aggressive=FALSE, betting=TRUE, bet=0)
+            aggressive=FALSE, betting=TRUE, bet=0, total_wins=0, neutral=FALSE)
 players = c(p1, p2, p3, p4, p5, p6) 
 
 # Simulates reps games where each game is 200 hands long and then records
@@ -703,7 +714,8 @@ betting_high = function(x, reps) {
   player = setRefClass("player", fields=list(hand="vector", money="numeric",
                                              score="numeric", high_card="numeric",
                                              won="logical", aggressive="logical",
-                                             betting="logical", bet="numeric"))
+                                             betting="logical", bet="numeric",
+                                             total_wins="numeric", neutral="logical"))
   
   df = data.frame(Player1 = rep(0,reps), Player2 = rep(0,reps), Player3 = rep(0,reps),
                   Player4 = rep(0,reps), Player5 = rep(0,reps), Player6 = rep(0,reps))
@@ -718,7 +730,6 @@ betting_high = function(x, reps) {
     }
     df[i,] = values
   }
-  print(x)
   return(df)
 }
 
@@ -734,26 +745,139 @@ end-start
 stopCluster(cl)
 
 # Grouping and plotting data
-high_bet_results = append(append(recorded_money$Player1,recorded_money$Player2),recorded_money$Player3)
-low_bet_results = append(append(recorded_money$Player4,recorded_money$Player5),recorded_money$Player6)
-all_results = append(high_bet_results,low_bet_results)
+high_bet_results = append(recorded_money$Player1,recorded_money$Player2)
+avg_bet_results = append(recorded_money$Player3,recorded_money$Player4)
+low_bet_results = append(recorded_money$Player5,recorded_money$Player6)
+all_results = append(append(high_bet_results, avg_bet_results), low_bet_results)
 x_min = min(all_results)
 x_max = max(all_results)
 bins = ceiling((x_max + abs(x_min)) / 50)
 expect_win_high = mean(high_bet_results)
+expect_win_avg = mean(avg_bet_results)
 expect_win_low = mean(low_bet_results)
 
-hist(low_bet_results, breaks=bins, xlim=c(x_min, x_max), ylim=c(0,2100),
+hist(low_bet_results, breaks=bins, xlim=c(x_min, x_max), ylim=c(0,1500),
      xlab="Difference in money after 200 hands", main="Average Difference in 
      Money After 200 Hands When Betting Low")
 abline(v=expect_win_low, col="red")
 
-hist(high_bet_results, breaks=bins, xlim=c(x_min, x_max), ylim=c(0,2100),
+hist(avg_bet_results, breaks=bins, xlim=c(x_min, x_max), ylim=c(0,1500),
+     xlab="Difference in money after 200 hands", main="Average Difference in 
+     Money After 200 Hands When Betting Neutral")
+abline(v=expect_win_avg, col="red")
+
+hist(high_bet_results, breaks=bins, xlim=c(x_min, x_max), ylim=c(0,1500),
      xlab="Difference in money after 200 hands", main="Average Difference in 
      Money After 200 Hands When Betting High")
 abline(v=expect_win_high, col="red")
 
 
+# Expected Winnings When All Players Bet High -----------------------------
+
+# Initializing players to have half of them bet high and the other half bet low
+p1 = player(hand=vector(), money=5000, score=0, high_card=0, won=FALSE,
+            aggressive=TRUE, betting=TRUE, bet=0, total_wins=0, neutral=FALSE)
+p2 = player(hand=vector(), money=5000, score=0, high_card=0, won=FALSE,
+            aggressive=TRUE, betting=TRUE, bet=0, total_wins=0, neutral=FALSE)
+p3 = player(hand=vector(), money=5000, score=0, high_card=0, won=FALSE,
+            aggressive=TRUE, betting=TRUE, bet=0, total_wins=0, neutral=FALSE)
+p4 = player(hand=vector(), money=5000, score=0, high_card=0, won=FALSE,
+            aggressive=TRUE, betting=TRUE, bet=0, total_wins=0, neutral=FALSE)
+p5 = player(hand=vector(), money=5000, score=0, high_card=0, won=FALSE,
+            aggressive=TRUE, betting=TRUE, bet=0, total_wins=0, neutral=FALSE)
+p6 = player(hand=vector(), money=5000, score=0, high_card=0, won=FALSE,
+            aggressive=TRUE, betting=TRUE, bet=0, total_wins=0, neutral=FALSE)
+players = c(p1, p2, p3, p4, p5, p6) 
+
+num_cores = detectCores()
+cl = makeCluster(num_cores - 1)
+registerDoParallel(cl)
+
+start = Sys.time()
+# Currently will process 6 * length(x) * reps games
+recorded_money2 = foreach(x = 1:100, .combine='rbind') %dopar% betting_high(x, 100)
+end = Sys.time()
+end-start
+stopCluster(cl)
+
+# Grouping and plotting data
+first_half = append(append(recorded_money2$Player1,recorded_money2$Player2),recorded_money2$Player3)
+second_half = append(append(recorded_money2$Player4,recorded_money2$Player5),recorded_money2$Player6)
+all_results = append(first_half,second_half)
+x_min = min(all_results)
+x_max = max(all_results)
+bins = ceiling((x_max + abs(x_min)) / 50)
+expect_win = mean(all_results)
+
+hist(all_results, breaks=bins, xlim=c(x_min, x_max), ylim=c(0,6000),
+     xlab="Difference in money after 200 hands", main="Average Difference in 
+     Money After 200 Hands With All Players Betting High")
+abline(v=expect_win, col="red")
+
+
+# Win Rates ---------------------------------------------------------------
+
+win_rates = c("Player 1 Wins" = p1$total_wins, "Player 2 Wins" = p2$total_wins,
+              "Player 3 Wins" = p3$total_wins, "Player 4 Wins" = p4$total_wins,
+              "Player 5 Wins" = p5$total_wins, "Player 6 Wins" = p6$total_wins)
+
+p1 = player(hand=vector(), money=5000, score=0, high_card=0, won=FALSE,
+            aggressive=TRUE, betting=TRUE, bet=0, total_wins=0, neutral=FALSE)
+p2 = player(hand=vector(), money=5000, score=0, high_card=0, won=FALSE,
+            aggressive=TRUE, betting=TRUE, bet=0, total_wins=0, neutral=FALSE)
+p3 = player(hand=vector(), money=5000, score=0, high_card=0, won=FALSE,
+            aggressive=FALSE, betting=TRUE, bet=0, total_wins=0, neutral=TRUE)
+p4 = player(hand=vector(), money=5000, score=0, high_card=0, won=FALSE,
+            aggressive=FALSE, betting=TRUE, bet=0, total_wins=0, neutral=TRUE)
+p5 = player(hand=vector(), money=5000, score=0, high_card=0, won=FALSE,
+            aggressive=FALSE, betting=TRUE, bet=0, total_wins=0, neutral=FALSE)
+p6 = player(hand=vector(), money=5000, score=0, high_card=0, won=FALSE,
+            aggressive=FALSE, betting=TRUE, bet=0, total_wins=0, neutral=FALSE)
+players = c(p1, p2, p3, p4, p5, p6)
+
+sim_hands = function(x, reps) {
+  deck = setRefClass("deck", fields=list(cards="vector"))
+  player = setRefClass("player", fields=list(hand="vector", money="numeric",
+                                             score="numeric", high_card="numeric",
+                                             won="logical", aggressive="logical",
+                                             betting="logical", bet="numeric",
+                                             total_wins="numeric", neutral="logical"))
+  
+  results = rep(0, length(players))
+  for (i in 1:reps) {
+    replicate(200, simulate_hand())
+    for (p in players) {
+      p$money = 5000
+    }
+  }
+  for (j in 1:length(results)) {
+    results[j] = players[[j]]$total_wins
+    players[[j]]$total_wins=0
+  }
+  return(results)
+}
+
+num_cores = detectCores()
+cl = makeCluster(num_cores - 1)
+registerDoParallel(cl)
+
+start = Sys.time()
+# Currently will process 6 * length(x) * reps games
+recorded_wins = foreach(x = 1:100, .combine='+') %dopar% sim_hands(x, 50)
+end = Sys.time()
+end-start
+stopCluster(cl)
+
+total_wins = sum(recorded_wins)
+win_df = data.frame(Total_Wins_By_Bet=rep(0,3), Win_Percentage_By_Bet=rep(0,3), 
+                    row.names=c("High_Bet_Wins",
+                                "Avg_Bet_Wins",
+                                "Low_Bet_Wins"))
+win_df[1,1] = recorded_wins[1] + recorded_wins[2]
+win_df[2,1] = recorded_wins[3] + recorded_wins[4]
+win_df[3,1] = recorded_wins[5] + recorded_wins[6]
+win_df$Win_Percentage_By_Bet = win_df$Total_Wins_By_Bet / total_wins
+win_df
 
 # Animating a hand of poker -----------------------------------------------
 
@@ -762,14 +886,21 @@ abline(v=expect_win_high, col="red")
 update_display = function(num_cards) {
   score_data = data.frame(Scores=rep(0, length(players)))
   names = vector(mode="character", length=length(players))
+  Legend = c()
   for (p in 1:length(players)) {
     calc_score(players[[p]])
     score_data[p,"Scores"] = players[[p]]$score
     names[p] = paste("Player", p)
   }
-  print(ggplot(data=score_data, aes(x = names, y=Scores)) + geom_col() + 
-    ggtitle(paste("Players' Scores With", num_cards, "Cards in Hand")) + 
-    xlab("Player Name") + ylab("Score"))
+  if (p1$score > p2$score) {
+    Legend = c("Winner","Loser")
+    
+  } else {
+    Legend = c("Loser","Winner")
+  }
+  print(ggplot(data=score_data, aes(x = names, y=Scores, fill = Legend)) + geom_col() + 
+          ggtitle(paste("Players' Scores With", num_cards, "Cards in Hand")) + 
+          xlab("Player Name") + ylab("Score") + ylim(0, 127))
   Sys.sleep(.75)
 }
 
@@ -798,5 +929,5 @@ p2 = player(hand=vector(), money=5000, score=0, high_card=0, won=FALSE,
 players = c(p1, p2)
 for (i in 1:10) {
   animate_hand()
-  Sys.sleep(2)
+  Sys.sleep(1.5)
 }

@@ -760,12 +760,19 @@ abline(v=expect_win_high, col="red")
 update_display = function(num_cards) {
   score_data = data.frame(Scores=rep(0, length(players)))
   names = vector(mode="character", length=length(players))
+  Legend = c()
   for (p in 1:length(players)) {
     calc_score(players[[p]])
     score_data[p,"Scores"] = players[[p]]$score
     names[p] = paste("Player", p)
   }
-  print(ggplot(data=score_data, aes(x = names, y=Scores)) + geom_col() + 
+  if (p1$score > p2$score) {
+    Legend = c("Winner","Loser")
+    
+  } else {
+    Legend = c("Loser","Winner")
+  }
+  print(ggplot(data=score_data, aes(x = names, y=Scores, fill = Legend)) + geom_col() + 
     ggtitle(paste("Players' Scores With", num_cards, "Cards in Hand")) + 
     xlab("Player Name") + ylab("Score"))
   Sys.sleep(.75)
@@ -796,5 +803,5 @@ p2 = player(hand=vector(), money=5000, score=0, high_card=0, won=FALSE,
 players = c(p1, p2)
 for (i in 1:10) {
   animate_hand()
-  Sys.sleep(2)
+  Sys.sleep(1.5)
 }
