@@ -5,6 +5,8 @@ library(foreach)
 library(doParallel)
 library(ggplot2)
 
+set.seed(123456)
+
 # Defining Classes --------------------------------------------------------
 deck = setRefClass("deck", fields=list(cards="vector"))
 player = setRefClass("player", fields=list(hand="vector", money="numeric",
@@ -562,7 +564,7 @@ registerDoParallel(cl)
 
 start = Sys.time()
 # Currently will process 50,000 * length(x) hands - To change, alter i or players vector in avg_score(x)
-scores_by_turn = foreach(x = 1:100, .combine=combine_df) %dopar% avg_score(x)
+scores_by_turn = foreach(x = 1:75, .combine=combine_df) %dopar% avg_score(x)
 end = Sys.time()
 end-start
 stopCluster(cl)
@@ -640,13 +642,20 @@ for (i in 1:length(ranks)) {
   }
 }
 
-p1 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE, aggressive=FALSE)
-p2 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE, aggressive=FALSE)
-p3 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE, aggressive=FALSE)
-p4 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE, aggressive=FALSE)
-p5 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE, aggressive=FALSE)
-p6 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE, aggressive=FALSE)
-p7 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE, aggressive=FALSE)
+p1 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE,
+            aggressive=FALSE, betting=TRUE, bet=0, total_wins=0, neutral=FALSE)
+p2 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE,
+            aggressive=FALSE, betting=TRUE, bet=0, total_wins=0, neutral=FALSE)
+p3 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE,
+            aggressive=FALSE, betting=TRUE, bet=0, total_wins=0, neutral=FALSE)
+p4 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE,
+            aggressive=FALSE, betting=TRUE, bet=0, total_wins=0, neutral=FALSE)
+p5 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE,
+            aggressive=FALSE, betting=TRUE, bet=0, total_wins=0, neutral=FALSE)
+p6 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE,
+            aggressive=FALSE, betting=TRUE, bet=0, total_wins=0, neutral=FALSE)
+p7 = player(hand=vector(), money=1000, score=0, high_card=0, won=FALSE,
+            aggressive=FALSE, betting=TRUE, bet=0, total_wins=0, neutral=FALSE)
 players = c(p1, p2, p3, p4, p5, p6, p7) 
 
 # Simulates 10000 hands without taking into account betting/folding so every player's
@@ -656,7 +665,9 @@ find_winning_hands = function(x, possible_hands) {
   deck = setRefClass("deck", fields=list(cards="vector"))
   player = setRefClass("player", fields=list(hand="vector", money="numeric",
                                              score="numeric", high_card="numeric",
-                                             won="logical", aggressive="logical"))
+                                             won="logical", aggressive="logical",
+                                             betting="logical", bet="numeric",
+                                             total_wins="numeric", neutral="logical"))
   df2 = data.frame(Total_Drawn = rep(0,91), Total_Win = rep(0,91),
                    row.names=possible_hands)
   for(i in 1:10000) {
@@ -679,7 +690,7 @@ registerDoParallel(cl)
 start = Sys.time()
 # Currently will process 70,000 * length(x) hands
 # To change, alter i or players vector in find_winning_hands(x)
-df2 = foreach(x = 1:100, .combine=combine_df) %dopar% find_winning_hands(x, possible_hands)
+df2 = foreach(x = 1:75, .combine=combine_df) %dopar% find_winning_hands(x, possible_hands)
 end = Sys.time()
 end-start
 stopCluster(cl)
@@ -739,7 +750,7 @@ registerDoParallel(cl)
 
 start = Sys.time()
 # Currently will process 6 * length(x) * reps games
-recorded_money = foreach(x = 1:100, .combine='rbind') %dopar% betting_high(x, 100)
+recorded_money = foreach(x = 1:100, .combine='rbind') %dopar% betting_high(x, 40)
 end = Sys.time()
 end-start
 stopCluster(cl)
@@ -756,17 +767,17 @@ expect_win_high = mean(high_bet_results)
 expect_win_avg = mean(avg_bet_results)
 expect_win_low = mean(low_bet_results)
 
-hist(low_bet_results, breaks=bins, xlim=c(x_min, x_max), ylim=c(0,1500),
+hist(low_bet_results, breaks=bins, xlim=c(x_min, x_max), ylim=c(0,600),
      xlab="Difference in money after 200 hands", main="Average Difference in 
      Money After 200 Hands When Betting Low")
 abline(v=expect_win_low, col="red")
 
-hist(avg_bet_results, breaks=bins, xlim=c(x_min, x_max), ylim=c(0,1500),
+hist(avg_bet_results, breaks=bins, xlim=c(x_min, x_max), ylim=c(0,600),
      xlab="Difference in money after 200 hands", main="Average Difference in 
      Money After 200 Hands When Betting Neutral")
 abline(v=expect_win_avg, col="red")
 
-hist(high_bet_results, breaks=bins, xlim=c(x_min, x_max), ylim=c(0,1500),
+hist(high_bet_results, breaks=bins, xlim=c(x_min, x_max), ylim=c(0,600),
      xlab="Difference in money after 200 hands", main="Average Difference in 
      Money After 200 Hands When Betting High")
 abline(v=expect_win_high, col="red")
@@ -795,7 +806,7 @@ registerDoParallel(cl)
 
 start = Sys.time()
 # Currently will process 6 * length(x) * reps games
-recorded_money2 = foreach(x = 1:100, .combine='rbind') %dopar% betting_high(x, 100)
+recorded_money2 = foreach(x = 1:100, .combine='rbind') %dopar% betting_high(x, 40)
 end = Sys.time()
 end-start
 stopCluster(cl)
@@ -809,7 +820,7 @@ x_max = max(all_results)
 bins = ceiling((x_max + abs(x_min)) / 50)
 expect_win = mean(all_results)
 
-hist(all_results, breaks=bins, xlim=c(x_min, x_max), ylim=c(0,6000),
+hist(all_results, breaks=bins, xlim=c(x_min, x_max), ylim=c(0,2000),
      xlab="Difference in money after 200 hands", main="Average Difference in 
      Money After 200 Hands With All Players Betting High")
 abline(v=expect_win, col="red")
@@ -820,7 +831,11 @@ abline(v=expect_win, col="red")
 win_rates = c("Player 1 Wins" = p1$total_wins, "Player 2 Wins" = p2$total_wins,
               "Player 3 Wins" = p3$total_wins, "Player 4 Wins" = p4$total_wins,
               "Player 5 Wins" = p5$total_wins, "Player 6 Wins" = p6$total_wins)
-
+player = setRefClass("player", fields=list(hand="vector", money="numeric",
+                                           score="numeric", high_card="numeric",
+                                           won="logical", aggressive="logical",
+                                           betting="logical", bet="numeric",
+                                           total_wins="numeric", neutral="logical"))
 p1 = player(hand=vector(), money=5000, score=0, high_card=0, won=FALSE,
             aggressive=TRUE, betting=TRUE, bet=0, total_wins=0, neutral=FALSE)
 p2 = player(hand=vector(), money=5000, score=0, high_card=0, won=FALSE,
